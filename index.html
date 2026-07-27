@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f4fb">
+  <meta name="description" content="Privates, offlinefähiges Gefühlsrad mit Verlauf, Statistik sowie CSV- und Excel-Import/Export.">
+  <title>Gefühlsrad</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="lock-screen" class="screen lock-screen hidden">
+    <section class="panel lock-panel">
+      <h1>Gefühlsrad</h1>
+      <p>PIN eingeben</p>
+      <label class="field"><span>PIN</span><input id="unlock-pin" type="password" inputmode="numeric" autocomplete="current-password"></label>
+      <p id="unlock-error" class="error" aria-live="polite"></p>
+      <button id="unlock-button" class="primary wide">Entsperren</button>
+    </section>
+  </div>
+
+  <div id="app" class="app hidden">
+    <main id="content" class="content"></main>
+    <nav class="bottom-nav" aria-label="Hauptnavigation">
+      <button data-screen="track" class="nav-button active"><span>✦</span>Tracken</button>
+      <button data-screen="history" class="nav-button"><span>▤</span>Verlauf</button>
+      <button data-screen="stats" class="nav-button"><span>◔</span>Statistik</button>
+      <button data-screen="edit" class="nav-button"><span>◉</span>Rad</button>
+      <button data-screen="settings" class="nav-button"><span>⌁</span>PIN</button>
+    </nav>
+  </div>
+
+  <dialog id="dialog"><form method="dialog" id="dialog-form"></form></dialog>
+  <input id="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+  <script src="app.js"></script>
+</body>
+</html>
