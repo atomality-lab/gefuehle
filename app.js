@@ -28,9 +28,38 @@ function save(){localStorage.setItem(KEY,JSON.stringify(state));}
 function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function formatDate(d){return new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(d).replace(',','');}
 function parseDate(v){
-  const m=String(v).trim().match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if(m){const d=new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5],+(m[6]||0));return isNaN(d)?null:d;}
-  const d=new Date(v); return isNaN(d)?null:d;
+  if(v instanceof Date)return isNaN(v.getTime())?null:v;
+  if(v===null||v===undefined||String(v).trim()==='')return null;
+  const raw=String(v).trim();
+
+  // Echte Excel-Datumszellen kommen beim XLSX-Import als Seriennummer an.
+  if(/^\d+(?:[.,]\d+)?$/.test(raw)){
+    const serial=Number(raw.replace(',','.'));
+    if(Number.isFinite(serial)&&serial>=1&&serial<100000){
+      const totalSeconds=Math.round(serial*86400);
+      const utc=new Date(Date.UTC(1899,11,30)+totalSeconds*1000);
+      const d=new Date(utc.getUTCFullYear(),utc.getUTCMonth(),utc.getUTCDate(),utc.getUTCHours(),utc.getUTCMinutes(),utc.getUTCSeconds());
+      return isNaN(d.getTime())?null:d;
+    }
+  }
+
+  const de=raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(de){
+    const d=new Date(+de[3],+de[2]-1,+de[1],+(de[4]||0),+(de[5]||0),+(de[6]||0));
+    return validDateParts(d,+de[3],+de[2],+de[1])?d:null;
+  }
+
+  const iso=raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/);
+  if(iso){
+    const d=new Date(+iso[1],+iso[2]-1,+iso[3],+(iso[4]||0),+(iso[5]||0),+(iso[6]||0));
+    return validDateParts(d,+iso[1],+iso[2],+iso[3])?d:null;
+  }
+
+  const d=new Date(raw);
+  return isNaN(d.getTime())?null:d;
+}
+function validDateParts(d,year,month,day){
+  return d.getFullYear()===year&&d.getMonth()===month-1&&d.getDate()===day;
 }
 function chipSize(t){const n=t.length;return n>22?'.72rem':n>16?'.8rem':n>11?'.9rem':'1rem';}
 function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;document.body.append(el);setTimeout(()=>el.remove(),2600);}
@@ -110,9 +139,49 @@ function renderSettings(){content.innerHTML=`<h1 class="screen-title">PIN-Schutz
 function promptDialog(title,label,done){dialogForm.innerHTML=`<h2>${esc(title)}</h2><label class="field"><span>${esc(label)}</span><input id="prompt-value"></label><div class="button-row"><button value="cancel" class="ghost">Abbrechen</button><button id="prompt-ok" type="button" class="primary">Übernehmen</button></div>`;dialog.showModal();dialogForm.querySelector('#prompt-ok').onclick=()=>{const v=dialogForm.querySelector('#prompt-value').value.trim();dialog.close();done(v);};}
 function confirmDialog(title,text,done){dialogForm.innerHTML=`<h2>${esc(title)}</h2><p>${esc(text)}</p><div class="button-row"><button value="cancel" class="ghost">Abbrechen</button><button id="confirm-ok" type="button" class="danger">Bestätigen</button></div>`;dialog.showModal();dialogForm.querySelector('#confirm-ok').onclick=()=>{dialog.close();done();};}
 
-fileInput.onchange=async()=>{const file=fileInput.files[0];if(!file)return;try{const rows=file.name.toLowerCase().endsWith('.xlsx')?await parseXLSX(file):parseCSV(await file.text());const result=importRows(rows);toast(`${result.added} importiert, ${result.duplicates} Dubletten übersprungen.`);renderHistory();}catch(err){console.error(err);toast('Import fehlgeschlagen: '+err.message);}finally{fileInput.value='';}};
+fileInput.onchange=async()=>{const file=fileInput.files[0];if(!file)return;try{const rows=file.name.toLowerCase().endsWith('.xlsx')?await parseXLSX(file):parseCSV(await file.text());const result=importRows(rows);showImportResult(result);renderHistory();}catch(err){console.error(err);toast('Import fehlgeschlagen: '+err.message);}finally{fileInput.value='';}};
 function normalizeHeader(h){return String(h).trim().toLowerCase().replace(/[ä]/g,'ae').replace(/[ö]/g,'oe').replace(/[ü]/g,'ue').replace(/ß/g,'ss').replace(/[^a-z]/g,'');}
-function importRows(rows){if(rows.length<2)throw new Error('Keine Datenzeilen gefunden.');const head=rows[0].map(normalizeHeader),ix=n=>head.findIndex(h=>n.includes(h));const map={time:ix(['zeitpunkt','datum','datetime']),main:ix(['hauptgefuehl','hauptgefuhl','hauptemotion']),sub:ix(['untergefuehl','untergefuhl','emotion']),intensity:ix(['intensitaet','intensitat']),body:ix(['koerpergefuehle','korpergefuhle','koerper','korper']),situation:ix(['situation','notiz','text'])};if(map.time<0||map.main<0||map.sub<0)throw new Error('Benötigte Spalten fehlen.');let added=0,duplicates=0;for(const r of rows.slice(1)){if(!r.some(Boolean))continue;const d=parseDate(r[map.time]);if(!d)continue;const main=String(r[map.main]||'').trim(),sub=String(r[map.sub]||'').trim();if(!main||!sub)continue;const body=map.body>=0?String(r[map.body]||'').split(/[,;|]/).map(x=>x.trim()).filter(Boolean):[];const e={id:uid(),main,sub,intensity:Math.min(10,Math.max(1,+(r[map.intensity]||5))),body,situation:map.situation>=0?String(r[map.situation]||''):'',time:d.toISOString()};const dupe=state.entries.some(x=>x.main===e.main&&x.sub===e.sub&&x.intensity===e.intensity&&x.situation===e.situation&&new Date(x.time).getTime()===d.getTime()&&JSON.stringify([...(x.body||[])].sort())===JSON.stringify([...body].sort()));if(dupe){duplicates++;continue;}state.entries.push(e);added++;let g=groupOf(main);if(!g){g={name:main,color:'#8D6E63',sub:[sub]};state.groups.push(g);}else if(!g.sub.includes(sub))g.sub.push(sub);body.forEach(x=>{if(!state.bodyCatalog.includes(x))state.bodyCatalog.push(x);});}state.entries.sort((a,b)=>new Date(b.time)-new Date(a.time));save();return {added,duplicates};}
+function importRows(rows){
+  if(rows.length<2)throw new Error('Keine Datenzeilen gefunden.');
+  const head=rows[0].map(normalizeHeader),ix=n=>head.findIndex(h=>n.includes(h));
+  const map={time:ix(['zeitpunkt','datum','datetime']),main:ix(['hauptgefuehl','hauptgefuhl','hauptemotion']),sub:ix(['untergefuehl','untergefuhl','emotion']),intensity:ix(['intensitaet','intensitat']),body:ix(['koerpergefuehle','korpergefuhle','koerper','korper']),situation:ix(['situation','notiz','text'])};
+  if(map.time<0||map.main<0||map.sub<0)throw new Error('Benötigte Spalten fehlen.');
+  let added=0,duplicates=0,skipped=0;
+  const errors=[];
+  rows.slice(1).forEach((r,index)=>{
+    const rowNumber=index+2;
+    try{
+      if(!r.some(v=>String(v??'').trim()!==''))return;
+      const d=parseDate(r[map.time]);
+      const main=String(r[map.main]??'').trim(),sub=String(r[map.sub]??'').trim();
+      if(!d)throw new Error('Datum nicht erkannt');
+      if(!main||!sub)throw new Error('Haupt- oder Untergefühl fehlt');
+      const body=map.body>=0?String(r[map.body]??'').split(/[,;|]/).map(x=>x.trim()).filter(Boolean):[];
+      const rawIntensity=map.intensity>=0?Number(String(r[map.intensity]??'').replace(',','.')):5;
+      const intensity=Number.isFinite(rawIntensity)?Math.min(10,Math.max(1,rawIntensity)):5;
+      const e={id:uid(),main,sub,intensity,body,situation:map.situation>=0?String(r[map.situation]??''):'',time:d.toISOString()};
+      const dupe=state.entries.some(x=>x.main===e.main&&x.sub===e.sub&&x.intensity===e.intensity&&x.situation===e.situation&&new Date(x.time).getTime()===d.getTime()&&JSON.stringify([...(x.body||[])].sort())===JSON.stringify([...body].sort()));
+      if(dupe){duplicates++;return;}
+      state.entries.push(e);added++;
+      let g=groupOf(main);
+      if(!g){g={name:main,color:'#8D6E63',sub:[sub]};state.groups.push(g);}
+      else if(!g.sub.includes(sub))g.sub.push(sub);
+      body.forEach(x=>{if(!state.bodyCatalog.includes(x))state.bodyCatalog.push(x);});
+    }catch(err){
+      skipped++;
+      if(errors.length<8)errors.push(`Zeile ${rowNumber}: ${err.message}`);
+    }
+  });
+  state.entries.sort((a,b)=>new Date(b.time)-new Date(a.time));
+  save();
+  return {added,duplicates,skipped,errors};
+}
+function showImportResult(result){
+  const parts=[`${result.added} Einträge importiert`,`${result.duplicates} Dubletten übersprungen`,`${result.skipped} fehlerhafte Zeilen übersprungen`];
+  if(!result.skipped)return toast(parts.slice(0,2).join(', ')+'.');
+  dialogForm.innerHTML=`<h2>Import abgeschlossen</h2><p>${parts.map(esc).join('<br>')}</p>${result.errors.length?`<div class="import-errors">${result.errors.map(x=>`<div>${esc(x)}</div>`).join('')}</div>`:''}<p class="hint">Der Import wurde trotz fehlerhafter Zeilen vollständig fortgesetzt.</p><div class="button-row"><button value="default" class="primary">Schließen</button></div>`;
+  dialog.showModal();
+}
 function parseCSV(text){const delimiter=(text.split('\n')[0].match(/;/g)||[]).length>=(text.split('\n')[0].match(/,/g)||[]).length?';':',';const rows=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(q&&text[i+1]==='"'){cell+='"';i++;}else q=!q;}else if(ch===delimiter&&!q){row.push(cell);cell='';}else if((ch==='\n'||ch==='\r')&&!q){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);rows.push(row);row=[];cell='';}else cell+=ch;}if(cell||row.length){row.push(cell);rows.push(row);}return rows;}
 function exportCSV(){const rows=exportRows();const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');download(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),'Gefuehlsrad_Export.csv');}
 function exportRows(){return [['Zeitpunkt','Hauptgefühl','Untergefühl','Intensität','Körpergefühle','Situation'],...state.entries.map(e=>[formatDate(new Date(e.time)),e.main,e.sub,e.intensity,(e.body||[]).join(', '),e.situation])];}
