@@ -1,4 +1,4 @@
-const APP_VERSION='1.2';
+const APP_VERSION='1.3';
 'use strict';
 
 const KEY='gefuehlsrad.pwa.v1';
@@ -64,7 +64,65 @@ function validDateParts(d,year,month,day){
 }
 function chipSize(t){const n=t.length;return n>22?'.72rem':n>16?'.8rem':n>11?'.9rem':'1rem';}
 function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;document.body.append(el);setTimeout(()=>el.remove(),2600);}
-function groupOf(name){return state.groups.find(g=>g.name===name);}
+function normalizeLabel(value){
+  return String(value??'')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g,' ')
+    .toLocaleLowerCase('de-DE');
+}
+function groupOf(name){
+  const key=normalizeLabel(name);
+  return state.groups.find(g=>normalizeLabel(g.name)===key);
+}
+function subOf(group,name){
+  const key=normalizeLabel(name);
+  return group?.sub.find(x=>normalizeLabel(x)===key)||null;
+}
+function groupContainingSub(name){
+  const key=normalizeLabel(name);
+  return state.groups.find(g=>g.sub.some(x=>normalizeLabel(x)===key))||null;
+}
+function resolveCatalogEmotion(mainValue,subValue){
+  let main=String(mainValue??'').trim();
+  let sub=String(subValue??'').trim();
+  let group=main?groupOf(main):null;
+
+  // Hauptgefühl immer gegen den vollständigen Rad-Katalog prüfen,
+  // nicht gegen bereits vorhandene Verlaufseinträge.
+  if(group) main=group.name;
+
+  // Fehlt das Hauptgefühl, kann es aus einem bekannten Untergefühl
+  // des Rad-Katalogs abgeleitet werden.
+  if(!group&&sub){
+    const owner=groupContainingSub(sub);
+    if(owner){
+      group=owner;
+      main=owner.name;
+      sub=subOf(owner,sub)||sub;
+    }else{
+      const sameAsMain=groupOf(sub);
+      if(sameAsMain){
+        group=sameAsMain;
+        main=sameAsMain.name;
+        sub=subOf(sameAsMain,sub)||sub;
+      }
+    }
+  }
+
+  // Manche Tabellen enthalten das konkrete Gefühl versehentlich in
+  // der Spalte Hauptgefühl. Auch dann im Katalog nach dem Besitzer suchen.
+  if(!group&&main){
+    const owner=groupContainingSub(main);
+    if(owner&&!sub){
+      group=owner;
+      sub=subOf(owner,main)||main;
+      main=owner.name;
+    }
+  }
+
+  return {main,sub,group};
+}
 function uid(){return Date.now()*1000+Math.floor(Math.random()*1000);}
 
 function boot(){
@@ -154,9 +212,11 @@ function importRows(rows){
     try{
       if(!r.some(v=>String(v??'').trim()!==''))return;
       const d=parseDate(r[map.time]);
-      const main=String(r[map.main]??'').trim(),sub=String(r[map.sub]??'').trim();
+      const resolved=resolveCatalogEmotion(r[map.main],r[map.sub]);
+      let {main,sub,group:g}=resolved;
       if(!d)throw new Error('Datum nicht erkannt');
-      if(!main||!sub)throw new Error('Haupt- oder Untergefühl fehlt');
+      if(!main)throw new Error('Hauptgefühl fehlt und konnte nicht aus dem Rad-Katalog ermittelt werden');
+      if(!sub)throw new Error('Untergefühl fehlt und konnte nicht aus dem Rad-Katalog ermittelt werden');
       const body=map.body>=0?String(r[map.body]??'').split(/[,;|]/).map(x=>x.trim()).filter(Boolean):[];
       const rawIntensity=map.intensity>=0?Number(String(r[map.intensity]??'').replace(',','.')):5;
       const intensity=Number.isFinite(rawIntensity)?Math.min(10,Math.max(1,rawIntensity)):5;
@@ -164,10 +224,20 @@ function importRows(rows){
       const dupe=state.entries.some(x=>x.main===e.main&&x.sub===e.sub&&x.intensity===e.intensity&&x.situation===e.situation&&new Date(x.time).getTime()===d.getTime()&&JSON.stringify([...(x.body||[])].sort())===JSON.stringify([...body].sort()));
       if(dupe){duplicates++;return;}
       state.entries.push(e);added++;
-      let g=groupOf(main);
-      if(!g){g={name:main,color:'#8D6E63',sub:[sub]};state.groups.push(g);}
-      else if(!g.sub.includes(sub))g.sub.push(sub);
-      body.forEach(x=>{if(!state.bodyCatalog.includes(x))state.bodyCatalog.push(x);});
+      if(!g){
+        g={name:main,color:'#8D6E63',sub:[sub]};
+        state.groups.push(g);
+      }else{
+        main=g.name;
+        const knownSub=subOf(g,sub);
+        if(knownSub)sub=knownSub;
+        else g.sub.push(sub);
+        e.main=main;
+        e.sub=sub;
+      }
+      body.forEach(x=>{
+        if(!state.bodyCatalog.some(y=>normalizeLabel(y)===normalizeLabel(x)))state.bodyCatalog.push(x);
+      });
     }catch(err){
       skipped++;
       if(errors.length<8)errors.push(`Zeile ${rowNumber}: ${err.message}`);

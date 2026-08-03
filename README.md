@@ -1,4 +1,4 @@
-# Gefühlsrad PWA V1.2.0
+# Gefühlsrad PWA V1.3
 
 Eine eigenständige Progressive Web App auf Basis des Funktionsumfangs von Gefühlsrad V3.7.
 
@@ -76,3 +76,11 @@ TT.MM.JJJJ HH:MM
 ## Neu in Version 1.2
 
 - Versionsanzeige im Bereich PIN
+
+
+## Neu in Version 1.3
+
+- Hauptgefühle werden beim Import gegen den vollständigen Gefühlsrad-Katalog geprüft, nicht gegen vorhandene Verlaufseinträge.
+- Groß-/Kleinschreibung, zusätzliche Leerzeichen und Unicode-Schreibweisen werden vereinheitlicht.
+- Fehlende Hauptgefühle können aus bekannten Untergefühlen des Katalogs abgeleitet werden.
+- Vorhandene Katalognamen werden in ihrer gespeicherten Schreibweise übernommen.
