@@ -84,3 +84,9 @@ TT.MM.JJJJ HH:MM
 - Groß-/Kleinschreibung, zusätzliche Leerzeichen und Unicode-Schreibweisen werden vereinheitlicht.
 - Fehlende Hauptgefühle können aus bekannten Untergefühlen des Katalogs abgeleitet werden.
 - Vorhandene Katalognamen werden in ihrer gespeicherten Schreibweise übernommen.
+
+
+## Version 1.4
+- Untergefühl beim Import ist optional.
+- Ein Datensatz wird importiert, wenn Zeitpunkt und Hauptgefühl vorhanden und gültig sind.
+- Leere Untergefühle werden im Verlauf ohne Trennpunkt angezeigt.

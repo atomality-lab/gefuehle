@@ -1,4 +1,4 @@
-const APP_VERSION='1.3';
+const APP_VERSION='1.4';
 'use strict';
 
 const KEY='gefuehlsrad.pwa.v1';
@@ -170,7 +170,7 @@ function renderTrack(){
     draft={group:draft.group,sub:'',intensity:5,body:[],date:formatDate(new Date()),situation:''};toast('Eintrag gespeichert.');renderTrack();
   };
 }
-function entryCard(e){const g=groupOf(e.main)||{color:'#888'};return `<article class="panel entry-card" style="--entry-color:${g.color}"><div class="entry-head"><div><h3>${esc(e.main)} · ${esc(e.sub)}</h3><div class="meta">${formatDate(new Date(e.time))} · Intensität ${e.intensity}/10</div></div></div>${e.body?.length?`<div class="badges">${e.body.map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div>`:''}<p>${esc(e.situation).replace(/\n/g,'<br>')}</p><div class="button-row"><button class="secondary" data-edit-entry="${e.id}">Bearbeiten</button><button class="danger" data-delete-entry="${e.id}">Löschen</button></div></article>`;}
+function entryCard(e){const g=groupOf(e.main)||{color:'#888'};const title=e.sub?`${esc(e.main)} · ${esc(e.sub)}`:esc(e.main);return `<article class="panel entry-card" style="--entry-color:${g.color}"><div class="entry-head"><div><h3>${title}</h3><div class="meta">${formatDate(new Date(e.time))} · Intensität ${e.intensity}/10</div></div></div>${e.body?.length?`<div class="badges">${e.body.map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div>`:''}<p>${esc(e.situation).replace(/\n/g,'<br>')}</p><div class="button-row"><button class="secondary" data-edit-entry="${e.id}">Bearbeiten</button><button class="danger" data-delete-entry="${e.id}">Löschen</button></div></article>`;}
 function renderHistory(){
   content.innerHTML=`<h1 class="screen-title">Verlauf</h1><p class="intro">Gespeicherte und importierte Einträge.</p><section class="panel"><div class="button-row"><button id="import" class="primary">Importieren</button><button id="export-csv" class="secondary">CSV exportieren</button><button id="export-xlsx" class="secondary">Excel exportieren</button><button id="clear" class="danger">Alle löschen</button></div></section>${state.entries.length?state.entries.sort((a,b)=>new Date(b.time)-new Date(a.time)).map(entryCard).join(''):'<section class="panel empty">Noch keine Einträge vorhanden.</section>'}`;
   content.querySelector('#import').onclick=()=>fileInput.click();
@@ -204,7 +204,7 @@ function importRows(rows){
   if(rows.length<2)throw new Error('Keine Datenzeilen gefunden.');
   const head=rows[0].map(normalizeHeader),ix=n=>head.findIndex(h=>n.includes(h));
   const map={time:ix(['zeitpunkt','datum','datetime']),main:ix(['hauptgefuehl','hauptgefuhl','hauptemotion']),sub:ix(['untergefuehl','untergefuhl','emotion']),intensity:ix(['intensitaet','intensitat']),body:ix(['koerpergefuehle','korpergefuhle','koerper','korper']),situation:ix(['situation','notiz','text'])};
-  if(map.time<0||map.main<0||map.sub<0)throw new Error('Benötigte Spalten fehlen.');
+  if(map.time<0||map.main<0)throw new Error('Benötigte Spalten fehlen: Zeitpunkt und Hauptgefühl.');
   let added=0,duplicates=0,skipped=0;
   const errors=[];
   rows.slice(1).forEach((r,index)=>{
@@ -212,11 +212,10 @@ function importRows(rows){
     try{
       if(!r.some(v=>String(v??'').trim()!==''))return;
       const d=parseDate(r[map.time]);
-      const resolved=resolveCatalogEmotion(r[map.main],r[map.sub]);
+      const resolved=resolveCatalogEmotion(r[map.main],map.sub>=0?r[map.sub]:'');
       let {main,sub,group:g}=resolved;
       if(!d)throw new Error('Datum nicht erkannt');
       if(!main)throw new Error('Hauptgefühl fehlt und konnte nicht aus dem Rad-Katalog ermittelt werden');
-      if(!sub)throw new Error('Untergefühl fehlt und konnte nicht aus dem Rad-Katalog ermittelt werden');
       const body=map.body>=0?String(r[map.body]??'').split(/[,;|]/).map(x=>x.trim()).filter(Boolean):[];
       const rawIntensity=map.intensity>=0?Number(String(r[map.intensity]??'').replace(',','.')):5;
       const intensity=Number.isFinite(rawIntensity)?Math.min(10,Math.max(1,rawIntensity)):5;
@@ -225,13 +224,15 @@ function importRows(rows){
       if(dupe){duplicates++;return;}
       state.entries.push(e);added++;
       if(!g){
-        g={name:main,color:'#8D6E63',sub:[sub]};
+        g={name:main,color:'#8D6E63',sub:sub?[sub]:[]};
         state.groups.push(g);
       }else{
         main=g.name;
-        const knownSub=subOf(g,sub);
-        if(knownSub)sub=knownSub;
-        else g.sub.push(sub);
+        if(sub){
+          const knownSub=subOf(g,sub);
+          if(knownSub)sub=knownSub;
+          else g.sub.push(sub);
+        }
         e.main=main;
         e.sub=sub;
       }
