@@ -1,4 +1,4 @@
-# Gefühlsrad PWA V1.3
+# Gefühlsrad PWA V1.4
 
 Eine eigenständige Progressive Web App auf Basis des Funktionsumfangs von Gefühlsrad V3.7.
 
