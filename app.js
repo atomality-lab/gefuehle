@@ -1,7 +1,9 @@
-const APP_VERSION='1.4';
+const APP_VERSION='2.0';
 'use strict';
 
-const KEY='gefuehlsrad.pwa.v1';
+const LEGACY_KEY='gefuehlsrad.pwa.v1';
+const DB_NAME='gefuehlsrad-db';
+const DB_VERSION=1;
 const defaultGroups=[
   {name:'Freude',color:'#4CAF50',sub:['fröhlich','zufrieden','erleichtert','hoffnungsvoll']},
   {name:'Angst',color:'#E53935',sub:['ängstlich','unsicher','nervös','überfordert']},
@@ -12,7 +14,8 @@ const defaultGroups=[
   {name:'Schuld',color:'#FFEB3B',sub:['schuldig','reuevoll','verantwortlich']}
 ];
 const defaultBody=['Hunger','Durst','Schmerz','Kälte','Wärme','Druck','Müdigkeit','Schwäche','Stärke'];
-let state=load();
+let state={pin:'',groups:structuredClone(defaultGroups),bodyCatalog:[...defaultBody],entries:[]};
+let db=null;
 let screen='track';
 let draft={group:'',sub:'',intensity:5,body:[],date:formatDate(new Date()),situation:''};
 const content=document.querySelector('#content');
@@ -22,10 +25,62 @@ const dialog=document.querySelector('#dialog');
 const dialogForm=document.querySelector('#dialog-form');
 const fileInput=document.querySelector('#file-input');
 
-function load(){
-  try{return {...{pin:'',groups:defaultGroups,bodyCatalog:defaultBody,entries:[]},...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{return {pin:'',groups:defaultGroups,bodyCatalog:defaultBody,entries:[]}}
+function openDatabase(){
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(DB_NAME,DB_VERSION);
+    request.onupgradeneeded=()=>{
+      const d=request.result;
+      if(!d.objectStoreNames.contains('catalog'))d.createObjectStore('catalog');
+      if(!d.objectStoreNames.contains('entries'))d.createObjectStore('entries',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('settings'))d.createObjectStore('settings');
+    };
+    request.onsuccess=()=>resolve(request.result);
+    request.onerror=()=>reject(request.error);
+  });
 }
-function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+function idbGet(store,key){return new Promise((resolve,reject)=>{const r=db.transaction(store,'readonly').objectStore(store).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+function idbGetAll(store){return new Promise((resolve,reject)=>{const r=db.transaction(store,'readonly').objectStore(store).getAll();r.onsuccess=()=>resolve(r.result||[]);r.onerror=()=>reject(r.error);});}
+function idbPut(store,value,key){return new Promise((resolve,reject)=>{const os=db.transaction(store,'readwrite').objectStore(store);const r=key===undefined?os.put(value):os.put(value,key);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error);});}
+function idbClear(store){return new Promise((resolve,reject)=>{const r=db.transaction(store,'readwrite').objectStore(store).clear();r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error);});}
+async function idbReplaceEntries(entries){const tx=db.transaction('entries','readwrite'),os=tx.objectStore('entries');os.clear();entries.forEach(e=>os.put(e));return new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}
+
+async function loadState(){
+  db=await openDatabase();
+  let groups=await idbGet('catalog','groups');
+  let bodyCatalog=await idbGet('catalog','bodyCatalog');
+  let pin=await idbGet('settings','pin');
+  let entries=await idbGetAll('entries');
+  const hasIndexedData=Array.isArray(groups)||Array.isArray(bodyCatalog)||entries.length||typeof pin==='string';
+  if(!hasIndexedData){
+    try{
+      const legacy=JSON.parse(localStorage.getItem(LEGACY_KEY)||'null');
+      if(legacy){
+        groups=Array.isArray(legacy.groups)?legacy.groups:null;
+        bodyCatalog=Array.isArray(legacy.bodyCatalog)?legacy.bodyCatalog:null;
+        pin=typeof legacy.pin==='string'?legacy.pin:'';
+        entries=Array.isArray(legacy.entries)?legacy.entries:[];
+      }
+    }catch{}
+  }
+  state={
+    pin:typeof pin==='string'?pin:'',
+    groups:Array.isArray(groups)&&groups.length?groups:structuredClone(defaultGroups),
+    bodyCatalog:Array.isArray(bodyCatalog)&&bodyCatalog.length?bodyCatalog:[...defaultBody],
+    entries:Array.isArray(entries)?entries:[]
+  };
+  await save();
+}
+async function save(){
+  if(!db)return;
+  try{
+    await Promise.all([
+      idbPut('catalog',structuredClone(state.groups),'groups'),
+      idbPut('catalog',[...state.bodyCatalog],'bodyCatalog'),
+      idbPut('settings',state.pin||'','pin'),
+      idbReplaceEntries(state.entries)
+    ]);
+  }catch(err){console.error('Speichern fehlgeschlagen',err);toast('Speichern ist fehlgeschlagen.');}
+}
 function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function formatDate(d){return new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(d).replace(',','');}
 function parseDate(v){
@@ -194,7 +249,18 @@ function renderEdit(){
   content.querySelectorAll('[data-del-body]').forEach(b=>b.onclick=()=>{state.bodyCatalog.splice(+b.dataset.delBody,1);save();renderEdit();});
 }
 function groupDialog(index){const old=index==null?{name:'',color:'#8D6E63',sub:[]}:state.groups[index];dialogForm.innerHTML=`<h2>${index==null?'Hauptgefühl hinzufügen':'Hauptgefühl bearbeiten'}</h2><label class="field"><span>Name</span><input id="g-name" value="${esc(old.name)}"></label><label class="field"><span>Farbe</span><input id="g-color" type="color" value="${old.color}"></label><label class="field"><span>Untergefühle, mit Komma getrennt</span><textarea id="g-sub">${esc(old.sub.join(', '))}</textarea></label><div class="button-row">${index==null?'':`<button id="g-delete" class="danger" type="button">Löschen</button>`}<button value="cancel" class="ghost">Abbrechen</button><button id="g-save" class="primary" type="button">Speichern</button></div>`;dialog.showModal();dialogForm.querySelector('#g-save').onclick=()=>{const g={name:dialogForm.querySelector('#g-name').value.trim(),color:dialogForm.querySelector('#g-color').value,sub:dialogForm.querySelector('#g-sub').value.split(',').map(x=>x.trim()).filter(Boolean)};if(!g.name||!g.sub.length)return toast('Name und mindestens ein Untergefühl eintragen.');if(index==null)state.groups.push(g);else state.groups[index]=g;save();dialog.close();renderEdit();};const del=dialogForm.querySelector('#g-delete');if(del)del.onclick=()=>{state.groups.splice(index,1);save();dialog.close();renderEdit();};}
-function renderSettings(){content.innerHTML=`<h1 class="screen-title">PIN-Schutz</h1><p class="intro">Die PIN schützt den Zugriff auf diesem Gerät und in diesem Browser.</p><section class="panel"><label class="field"><span>Neue PIN</span><input id="new-pin" type="password" inputmode="numeric" value="${esc(state.pin)}"></label><label class="field"><span>PIN wiederholen</span><input id="repeat-pin" type="password" inputmode="numeric"></label><button id="pin-save" class="primary wide">PIN speichern</button><p class="hint">Leer lassen und speichern, um den PIN-Schutz auszuschalten.</p></section><section class="panel"><h2>Datensicherung</h2><p>Für einen Gerätewechsel exportierst du die Einträge und importierst sie auf dem anderen Gerät. Die App synchronisiert nicht automatisch über das Internet.</p></section><p class="app-version">Gefühlsrad · Version ${APP_VERSION}</p>`;content.querySelector('#pin-save').onclick=()=>{const a=content.querySelector('#new-pin').value,b=content.querySelector('#repeat-pin').value;if(a!==b)return toast('Die PIN-Eingaben stimmen nicht überein.');state.pin=a;save();toast(a?'PIN gespeichert.':'PIN-Schutz ausgeschaltet.');};}
+function renderSettings(){
+  content.innerHTML=`<h1 class="screen-title">PIN-Schutz</h1><p class="intro">Die PIN schützt den Zugriff auf diesem Gerät und in diesem Browser.</p>
+  <section class="panel"><label class="field"><span>Neue PIN</span><input id="new-pin" type="password" inputmode="numeric" value="${esc(state.pin)}"></label><label class="field"><span>PIN wiederholen</span><input id="repeat-pin" type="password" inputmode="numeric"></label><button id="pin-save" class="primary wide">PIN speichern</button><p class="hint">Leer lassen und speichern, um den PIN-Schutz auszuschalten.</p></section>
+  <section class="panel"><h2>Datensicherung</h2><p>Die Daten werden jetzt in einer versionierten IndexedDB gespeichert. Normale App-Updates und Service-Worker-Cachewechsel überschreiben den Katalog nicht.</p><div class="button-row"><button id="catalog-export" class="secondary">Katalog exportieren</button><button id="catalog-import" class="secondary">Katalog importieren</button></div><input id="catalog-file" type="file" accept="application/json,.json" hidden><p class="hint">Das Katalog-Backup enthält Hauptgefühle, Untergefühle, Farben und Körpergefühle, aber keine Verlaufseinträge.</p></section>
+  <p class="app-version">Gefühlsrad · Version ${APP_VERSION}</p>`;
+  content.querySelector('#pin-save').onclick=()=>{const a=content.querySelector('#new-pin').value,b=content.querySelector('#repeat-pin').value;if(a!==b)return toast('Die PIN-Eingaben stimmen nicht überein.');state.pin=a;save();toast(a?'PIN gespeichert.':'PIN-Schutz ausgeschaltet.');};
+  content.querySelector('#catalog-export').onclick=exportCatalog;
+  const catalogFile=content.querySelector('#catalog-file');
+  content.querySelector('#catalog-import').onclick=()=>catalogFile.click();
+  catalogFile.onchange=async()=>{const file=catalogFile.files?.[0];if(file)await importCatalog(file);catalogFile.value='';};
+}
+
 function promptDialog(title,label,done){dialogForm.innerHTML=`<h2>${esc(title)}</h2><label class="field"><span>${esc(label)}</span><input id="prompt-value"></label><div class="button-row"><button value="cancel" class="ghost">Abbrechen</button><button id="prompt-ok" type="button" class="primary">Übernehmen</button></div>`;dialog.showModal();dialogForm.querySelector('#prompt-ok').onclick=()=>{const v=dialogForm.querySelector('#prompt-value').value.trim();dialog.close();done(v);};}
 function confirmDialog(title,text,done){dialogForm.innerHTML=`<h2>${esc(title)}</h2><p>${esc(text)}</p><div class="button-row"><button value="cancel" class="ghost">Abbrechen</button><button id="confirm-ok" type="button" class="danger">Bestätigen</button></div>`;dialog.showModal();dialogForm.querySelector('#confirm-ok').onclick=()=>{dialog.close();done();};}
 
@@ -259,6 +325,25 @@ function exportCSV(){const rows=exportRows();const csv=rows.map(r=>r.map(v=>'"'+
 function exportRows(){return [['Zeitpunkt','Hauptgefühl','Untergefühl','Intensität','Körpergefühle','Situation'],...state.entries.map(e=>[formatDate(new Date(e.time)),e.main,e.sub,e.intensity,(e.body||[]).join(', '),e.situation])];}
 function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 
+function exportCatalog(){
+  const payload={format:'gefuehlsrad-katalog',version:1,exportedAt:new Date().toISOString(),groups:state.groups,bodyCatalog:state.bodyCatalog};
+  download(new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'}),`Gefuehlsrad_Katalog_${new Date().toISOString().slice(0,10)}.json`);
+}
+async function importCatalog(file){
+  try{
+    const data=JSON.parse(await file.text());
+    if(data.format!=='gefuehlsrad-katalog'||!Array.isArray(data.groups)||!Array.isArray(data.bodyCatalog))throw new Error('Die Datei ist kein gültiges Gefühlsrad-Katalog-Backup.');
+    const groups=data.groups.filter(g=>g&&typeof g.name==='string'&&typeof g.color==='string'&&Array.isArray(g.sub)).map(g=>({name:g.name.trim(),color:g.color,sub:g.sub.map(x=>String(x).trim()).filter(Boolean)})).filter(g=>g.name);
+    const body=data.bodyCatalog.map(x=>String(x).trim()).filter(Boolean);
+    if(!groups.length)throw new Error('Der Katalog enthält keine Hauptgefühle.');
+    state.groups=groups;
+    state.bodyCatalog=[...new Set(body)];
+    await save();
+    toast('Katalog wurde importiert.');
+    renderSettings();
+  }catch(err){toast(err.message||'Katalog konnte nicht importiert werden.');}
+}
+
 async function parseXLSX(file){const files=await unzip(new Uint8Array(await file.arrayBuffer()));const sheetName=[...files.keys()].find(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n));if(!sheetName)throw new Error('Kein Tabellenblatt gefunden.');const xml=new TextDecoder().decode(files.get(sheetName)),shared=files.has('xl/sharedStrings.xml')?[...new DOMParser().parseFromString(new TextDecoder().decode(files.get('xl/sharedStrings.xml')),'application/xml').querySelectorAll('si')].map(si=>si.textContent):[];const doc=new DOMParser().parseFromString(xml,'application/xml'),rows=[];doc.querySelectorAll('row').forEach(row=>{const out=[];row.querySelectorAll('c').forEach(c=>{const ref=c.getAttribute('r')||'A1',col=lettersToIndex(ref.match(/[A-Z]+/)[0]);while(out.length<col)out.push('');const type=c.getAttribute('t'),v=c.querySelector('v')?.textContent??c.querySelector('is')?.textContent??'';out[col]=type==='s'?shared[+v]??'':v;});rows.push(out);});return rows;}
 function lettersToIndex(s){let n=0;for(const ch of s)n=n*26+ch.charCodeAt(0)-64;return n-1;}
 async function unzip(bytes){const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let eocd=-1;for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--)if(view.getUint32(i,true)===0x06054b50){eocd=i;break;}if(eocd<0)throw new Error('Ungültige XLSX-Datei.');const count=view.getUint16(eocd+10,true),offset=view.getUint32(eocd+16,true),out=new Map();let p=offset;for(let i=0;i<count;i++){if(view.getUint32(p,true)!==0x02014b50)break;const method=view.getUint16(p+10,true),comp=view.getUint32(p+20,true),nameLen=view.getUint16(p+28,true),extraLen=view.getUint16(p+30,true),commentLen=view.getUint16(p+32,true),local=view.getUint32(p+42,true),name=new TextDecoder().decode(bytes.slice(p+46,p+46+nameLen));const ln=view.getUint16(local+26,true),le=view.getUint16(local+28,true),start=local+30+ln+le,data=bytes.slice(start,start+comp);if(!name.endsWith('/'))out.set(name,method===0?data:await inflateRaw(data));p+=46+nameLen+extraLen+commentLen;}return out;}
@@ -275,4 +360,4 @@ function crc32(data){let c=0xffffffff;for(const b of data){c^=b;for(let k=0;k<8;
 function zipStore(files){const enc=new TextEncoder(),parts=[],central=[];let offset=0,count=0;for(const [name,text] of Object.entries(files)){const n=enc.encode(name),d=enc.encode(text),crc=crc32(d),local=new Uint8Array(30+n.length+d.length),v=new DataView(local.buffer);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x800,true);v.setUint16(8,0,true);v.setUint32(14,crc,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,n.length,true);local.set(n,30);local.set(d,30+n.length);parts.push(local);const cen=new Uint8Array(46+n.length),cv=new DataView(cen.buffer);cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x800,true);cv.setUint32(16,crc,true);cv.setUint32(20,d.length,true);cv.setUint32(24,d.length,true);cv.setUint16(28,n.length,true);cv.setUint32(42,offset,true);cen.set(n,46);central.push(cen);offset+=local.length;count++;}const centralSize=central.reduce((a,b)=>a+b.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);ev.setUint32(0,0x06054b50,true);ev.setUint16(8,count,true);ev.setUint16(10,count,true);ev.setUint32(12,centralSize,true);ev.setUint32(16,offset,true);return new Blob([...parts,...central,end]);}
 
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error));
-boot();
+loadState().then(boot).catch(err=>{console.error(err);document.body.innerHTML='<main style="padding:24px;font-family:system-ui"><h1>Gefühlsrad</h1><p>Die lokale Datenbank konnte nicht geöffnet werden.</p></main>';});
