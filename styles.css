@@ -78,3 +78,5 @@ dialog::backdrop { background:rgba(35,25,40,.45); backdrop-filter:blur(3px); }
   .two-col{grid-template-columns:1fr}.wheel-button{width:76px;transform:translate(-50%,-50%) rotate(var(--angle)) translateY(-40vw) rotate(calc(-1 * var(--angle)));font-size:.82rem}.catalog-row{grid-template-columns:1fr auto}.catalog-row .color-dot{display:none}.content{padding-inline:11px}.panel{border-radius:18px;padding:14px}.nav-button{font-size:.68rem}}
 
 .import-errors{max-height:14rem;overflow:auto;padding:.75rem;margin:.75rem 0;border-radius:.75rem;background:#f3f1f5;font-size:.9rem;line-height:1.5;}
+
+.app-version{margin:18px 0 4px;text-align:center;color:var(--muted);font-size:.82rem;}

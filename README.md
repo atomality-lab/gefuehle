@@ -1,4 +1,4 @@
-# Gefühlsrad PWA V1.1.0
+# Gefühlsrad PWA V1.2.0
 
 Eine eigenständige Progressive Web App auf Basis des Funktionsumfangs von Gefühlsrad V3.7.
 
@@ -66,9 +66,13 @@ TT.MM.JJJJ HH:MM
 ```
 
 
-## Änderungen in V1.1
+## Änderungen in V1.2
 
 - Erkennt echte Excel-Datumszellen und Excel-Seriennummern.
 - Akzeptiert deutsche und ISO-Datumsangaben mit oder ohne Sekunden.
 - Überspringt fehlerhafte Zeilen, statt den gesamten Import zu stoppen.
 - Zeigt importierte Einträge, Dubletten und übersprungene Zeilen getrennt an.
+
+## Neu in Version 1.2
+
+- Versionsanzeige im Bereich PIN
